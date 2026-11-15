@@ -9,11 +9,14 @@ export function tierValue(label: string): number | undefined {
   return base * (match[2] === '+' ? 1.125 : match[2] === '-' ? 0.875 : 1);
 }
 
-export function scoreOutcomes(outcomes: Unit[], owned: Set<string>, goal: GoalConfiguration): number {
-  const seen = new Set(owned);
+export function scoreOutcomes(outcomes: Unit[], account: AccountProfile, goal: GoalConfiguration): number {
+  const acquired = new Set<string>();
   let score = 0;
   for (const unit of outcomes) {
-    const duplicate = seen.has(unit.id);
+    const ownership = account.collection[unit.id];
+    const confirmedUnowned = ownership === 'unowned'
+      || (ownership === undefined && account.completeness[unit.rarity] === true);
+    const duplicate = ownership === 'owned' || !confirmedUnowned || acquired.has(unit.id);
     if (goal.objective === 'mostUbers' && unit.rarity === 'Uber Rare') score += 1;
     if (goal.objective === 'uniqueCats' && !duplicate) score += 1;
     if (goal.objective === 'bestValue' && !duplicate && unit.ranking) score += tierValue(unit.ranking.label) ?? 0;
@@ -23,19 +26,17 @@ export function scoreOutcomes(outcomes: Unit[], owned: Set<string>, goal: GoalCo
       if (!duplicate && unit.ranking) score += (tierValue(unit.ranking.label) ?? 0) * goal.customWeights.tierValue;
       if (duplicate) score -= goal.customWeights.duplicates;
     }
-    seen.add(unit.id);
+    acquired.add(unit.id);
   }
   return score;
 }
 
-export function targetFulfillment(outcomes: Unit[], account: AccountProfile, goal: GoalConfiguration): TargetFulfillment {
+export function targetFulfillment(outcomes: Unit[], _account: AccountProfile, goal: GoalConfiguration): TargetFulfillment {
   const counts: TargetFulfillment = { essential: 0, high: 0, medium: 0, optional: 0, byTarget: {} };
   const targetCounts = new Map(goal.targets.map((target) => [target.unitId, 0]));
   for (const unit of outcomes) {
     const target = goal.targets.find((candidate) => candidate.unitId === unit.id);
     if (!target || targetCounts.get(unit.id) === undefined || targetCounts.get(unit.id)! >= target.copies) continue;
-    const ownership = account.collection[unit.id];
-    if (ownership !== 'owned' && ownership !== 'unowned') continue;
     targetCounts.set(unit.id, targetCounts.get(unit.id)! + 1);
     counts[target.priority] += 1;
     counts.byTarget[unit.id] = targetCounts.get(unit.id)!;

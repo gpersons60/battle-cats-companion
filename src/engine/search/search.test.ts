@@ -8,6 +8,12 @@ describe('bounded planning', () => {
     const result = searchRoutes(emptyProfile(), banners[0], units, { objective: 'mostUbers', targets: [], pullLimit: 11, ticketControl: 'none', resourceCaps: {}, customWeights: { tierValue: 1, uniqueCats: 0, ubers: 0, duplicates: 0 } });
     expect(result[0].status).toBe('blocked');
   });
+  it('requests a target instead of comparing zero-score specific-target routes', () => {
+    const profile = { ...emptyProfile(), seed: { status: 'resolved' as const, seed: 22, convention: 'canonical-pre-draw' as const } };
+    const result = searchRoutes(profile, banners[0], units, { objective: 'targets', targets: [], pullLimit: 11, ticketControl: 'none', resourceCaps: {}, customWeights: { tierValue: 0, uniqueCats: 0, ubers: 0, duplicates: 0 } });
+    expect(result[0].status).toBe('blocked');
+    expect(result[0].limitations[0]).toContain('target');
+  });
   it('respects disabled ticket types and pull horizons', () => {
     const profile = { ...emptyProfile(), seed: { status: 'resolved' as const, seed: 22, convention: 'canonical-pre-draw' as const } };
     const result = searchRoutes(profile, banners[0], units, { objective: 'uniqueCats', targets: [], pullLimit: 1, ticketControl: 'none', resourceCaps: {}, customWeights: { tierValue: 1, uniqueCats: 0, ubers: 0, duplicates: 0 } });

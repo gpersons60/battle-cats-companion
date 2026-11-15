@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { banners, getUnit, units } from './data/catalogue';
-import { emptyProfile, type AccountProfile, type GoalConfiguration, type Objective } from './domain/contracts';
+import { emptyProfile, type AccountProfile, type Currency, type GoalConfiguration, type Objective, type ResourceVector } from './domain/contracts';
 import { predict } from './engine/prediction/predictor';
 import { searchRoutes } from './engine/search/search';
-import { confirmDrawTransaction, createInitialProfile, loadActiveProfile, updateProfileTransaction } from './storage/accountStore';
+import { confirmDrawTransaction, createInitialProfile, loadActiveProfile, recoverSeedTransaction, reviewRecoveredPlan, updateProfileTransaction } from './storage/accountStore';
 import './styles.css';
 
 type Page = 'home' | 'account' | 'discover' | 'tracker' | 'planner' | 'guide';
@@ -22,6 +22,8 @@ export default function App() {
   const [lastRoute, setLastRoute] = useState<ReturnType<typeof searchRoutes>[number]>();
   const [search, setSearch] = useState('');
   const [storageError, setStorageError] = useState('');
+  const [recoverySeed, setRecoverySeed] = useState('');
+  const [recoveryAssumptions, setRecoveryAssumptions] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -62,12 +64,16 @@ export default function App() {
   async function setSeed() {
     const seed = Number(seedInput);
     if (!/^\d+$/.test(seedInput.trim()) || !Number.isSafeInteger(seed)) { setRouteMessage('Enter a non-negative integer seed.'); return; }
+    if (currentProfile.guidePaused) {
+      setRouteMessage('Use the explicit recovery form in Pulling Guide while the guide is paused.');
+      return;
+    }
     if (await mutateProfile((current) => ({ ...current, seed: { status: 'resolved', seed, convention: 'canonical-pre-draw' } }))) setRouteMessage('Canonical seed saved locally.');
   }
   function runPlanner() {
     const results = searchRoutes(currentProfile, banner, units, goal);
     setLastRoute(results[0]);
-    setRouteMessage(results.length ? `Found ${results.length} bounded route option(s).` : 'No eligible route in the selected horizon.');
+    setRouteMessage(results[0]?.status === 'blocked' ? results[0].limitations[0] : `Found ${results.length} bounded route option(s).`);
   }
   const routeIsCurrent = lastRoute !== undefined
     && lastRoute.status !== 'blocked'
@@ -75,7 +81,7 @@ export default function App() {
     && lastRoute.accountRevision === currentProfile.revision
     && lastRoute.goalKey === JSON.stringify(goal)
     && lastRoute.bannerVersion === banner.version;
-  function confirmCurrent(matchedPrediction: boolean, actualOutcomes: Array<string | null>) {
+  function confirmCurrent(matchedPrediction: boolean, actualOutcomes: Array<string | null>, actualCost: Partial<ResourceVector>) {
     if (!routeIsCurrent) {
       setRouteMessage('This proposal is stale or blocked. Search again before confirming.');
       return;
@@ -86,7 +92,7 @@ export default function App() {
       actionId: action.id,
       action,
       outcomes: actualOutcomes,
-      actualCost: action.cost,
+      actualCost,
       matchedPrediction,
       seedAfter
     }).then((next) => {
@@ -94,6 +100,27 @@ export default function App() {
       setLastRoute(undefined);
       setRouteMessage(matchedPrediction ? 'Demo confirmation recorded once.' : 'Mismatch recorded. The guide is paused and the seed is unresolved.');
     }).catch((error: unknown) => setRouteMessage(error instanceof Error ? error.message : 'The confirmation failed.'));
+  }
+
+  function recoverSeed() {
+    const seed = Number(recoverySeed);
+    if (!/^\d+$/.test(recoverySeed.trim()) || !Number.isSafeInteger(seed) || recoveryAssumptions.trim() === '') {
+      setRouteMessage('Enter a non-negative integer corrected seed and explain the recovery assumptions.');
+      return;
+    }
+    void recoverSeedTransaction(currentProfile.id, currentProfile.revision, seed, recoveryAssumptions).then((next) => {
+      setProfile(next);
+      setLastRoute(undefined);
+      setRouteMessage('Corrected seed saved. Replan and review the replacement route before resuming.');
+    }).catch((error: unknown) => setRouteMessage(error instanceof Error ? error.message : 'Seed recovery failed.'));
+  }
+
+  function reviewRecovery() {
+    void reviewRecoveredPlan(currentProfile.id, currentProfile.revision).then((next) => {
+      setProfile(next);
+      setLastRoute(undefined);
+      setRouteMessage('Recovery review accepted. Search again to create a fresh proposal.');
+    }).catch((error: unknown) => setRouteMessage(error instanceof Error ? error.message : 'Recovery review failed.'));
   }
 
   return <div className="app-shell">
@@ -104,8 +131,8 @@ export default function App() {
       {page === 'account' && <Account profile={profile} seedInput={seedInput} setSeedInput={setSeedInput} setSeed={setSeed} mutate={mutateProfile} message={routeMessage} />}
       {page === 'discover' && <Discover search={search} setSearch={setSearch} owned={owned} mutate={mutateProfile} />}
       {page === 'tracker' && <Tracker profile={profile} banner={banner} />}
-      {page === 'planner' && <Planner goal={goal} setGoal={(next) => { setGoal(next); setLastRoute(undefined); }} banner={banner} selectedBanner={selectedBanner} setSelectedBanner={(next) => { setSelectedBanner(next); setLastRoute(undefined); }} runPlanner={runPlanner} route={lastRoute} message={routeMessage} />}
-      {page === 'guide' && <Guide route={lastRoute} canConfirm={routeIsCurrent} confirm={confirmCurrent} paused={profile.guidePaused} message={routeMessage} banner={banner} />}
+      {page === 'planner' && <Planner goal={goal} setGoal={(next) => { setGoal(next); setLastRoute(undefined); }} banner={banner} selectedBanner={selectedBanner} setSelectedBanner={(next) => { setSelectedBanner(next); setLastRoute(undefined); }} runPlanner={runPlanner} route={lastRoute} message={routeMessage} recoveryPendingReview={profile.recoveryPendingReview} reviewRecovery={reviewRecovery} />}
+      {page === 'guide' && <Guide route={lastRoute} canConfirm={routeIsCurrent} confirm={confirmCurrent} paused={profile.guidePaused} message={routeMessage} banner={banner} recoverySeed={recoverySeed} setRecoverySeed={setRecoverySeed} recoveryAssumptions={recoveryAssumptions} setRecoveryAssumptions={setRecoveryAssumptions} recoverSeed={recoverSeed} />}
     </main>
     <footer>Local-first. No game login, automatic pulls, live event feed, portraits, rankings, or fabricated predictions.</footer>
   </div>;
@@ -129,15 +156,40 @@ function Tracker({ profile, banner }: { profile: AccountProfile; banner: typeof 
   return <section className="content"><div className="section-heading"><div><p className="eyebrow">No state mutation</p><h2>Seed Tracker</h2></div><span className="pill">Position 1</span></div><div className="panel"><h3>Next eligible single</h3>{prediction ? <><div className="outcome-large">{getUnit(prediction.outcomes[0])?.name ?? 'Unknown unit'}</div><p className="muted">Configuration: {banner.name}. This is a synthetic fixture and not a verified live banner.</p></> : <p className="notice">Resolve a numeric seed in Account to inspect outcomes.</p>}</div><div className="panel"><h3>Reachability reminder</h3><p className="muted">A matching table position is not a route. Actual reachability must account for prior pulls, duplicate switches, costs, and the selected action context.</p></div></section>;
 }
 
-function Planner({ goal, setGoal, banner, selectedBanner, setSelectedBanner, runPlanner, route, message }: { goal: GoalConfiguration; setGoal: (g: GoalConfiguration) => void; banner: typeof banners[number]; selectedBanner: string; setSelectedBanner: (v: string) => void; runPlanner: () => void; route?: ReturnType<typeof searchRoutes>[number]; message: string }) {
+function Planner({ goal, setGoal, banner, selectedBanner, setSelectedBanner, runPlanner, route, message, recoveryPendingReview, reviewRecovery }: { goal: GoalConfiguration; setGoal: (g: GoalConfiguration) => void; banner: typeof banners[number]; selectedBanner: string; setSelectedBanner: (v: string) => void; runPlanner: () => void; route?: ReturnType<typeof searchRoutes>[number]; message: string; recoveryPendingReview: boolean; reviewRecovery: () => void }) {
   const objectives: Array<[Objective, string]> = [['targets', 'Specific targets'], ['mostUbers', 'Most Ubers'], ['uniqueCats', 'Most unique cats'], ['bestValue', 'Best overall value'], ['custom', 'Custom strategy']];
-  return <section className="content"><div className="section-heading"><div><p className="eyebrow">Bounded route search</p><h2>Route Planner</h2></div><span className="pill">Pulls, not row distance</span></div><div className="grid-two"><div className="panel"><h3>Goal first</h3><label>Objective<select value={goal.objective} onChange={(event) => setGoal({ ...goal, objective: event.target.value as Objective })}>{objectives.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Pull limit<input type="number" min="1" max="100" value={goal.pullLimit} onChange={(event) => setGoal({ ...goal, pullLimit: Number(event.target.value) })} /></label><label>Special-ticket control<select value={goal.ticketControl} onChange={(event) => setGoal({ ...goal, ticketControl: event.target.value as GoalConfiguration['ticketControl'] })}><option value="none">None</option><option value="platinum">Platinum</option><option value="legend">Legend</option><option value="both">Both</option></select></label><label>Configuration<select value={selectedBanner} onChange={(event) => setSelectedBanner(event.target.value)}><option value={banner.id}>{banner.name}</option></select></label><button onClick={runPlanner}>Search bounded options</button>{message && <p className="notice">{message}</p>}</div><div className="panel"><h3>Planning assumptions</h3><ul className="clean-list"><li>All balances are optional; requirements are conditional.</li><li>Standard costs only; discount/payment mechanics are not verified.</li><li>Demo data is visibly labelled and not a live event.</li><li>Up to three materially different options are returned.</li></ul></div></div>{route && <div className="panel result"><div className="result-header"><div><p className="eyebrow">{route.status}</p><h3>{route.actions[0]?.type ?? 'No action'}</h3></div><strong>Score {route.score}</strong></div><p>Costs: {route.costs.catFood} Cat Food · {route.costs.rareTickets} Rare · {route.costs.platinumTickets} Platinum · {route.costs.legendTickets} Legend</p><div className="outcomes">{route.outcomes.map((id, index) => <span key={`${id}-${index}`}>{getUnit(id)?.name ?? id}</span>)}</div>{route.limitations.map((limitation) => <p className="muted" key={limitation}>{limitation}</p>)}</div>}</section>;
+  const [targetUnitId, setTargetUnitId] = useState(units[0].id);
+  const [targetCopies, setTargetCopies] = useState('1');
+  const [targetPriority, setTargetPriority] = useState<GoalConfiguration['targets'][number]['priority']>('essential');
+  function addTarget() {
+    const copies = Number(targetCopies);
+    if (!Number.isSafeInteger(copies) || copies < 1) return;
+    setGoal({ ...goal, targets: [...goal.targets.filter((target) => target.unitId !== targetUnitId), { unitId: targetUnitId, copies, priority: targetPriority }] });
+  }
+  return <section className="content"><div className="section-heading"><div><p className="eyebrow">Bounded route search</p><h2>Route Planner</h2></div><span className="pill">Pulls, not row distance</span></div><div className="grid-two"><div className="panel"><h3>Goal first</h3><label>Objective<select value={goal.objective} onChange={(event) => setGoal({ ...goal, objective: event.target.value as Objective })}>{objectives.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Pull limit<input type="number" min="1" max="100" value={goal.pullLimit} onChange={(event) => setGoal({ ...goal, pullLimit: Number(event.target.value) })} /></label><label>Special-ticket control<select value={goal.ticketControl} onChange={(event) => setGoal({ ...goal, ticketControl: event.target.value as GoalConfiguration['ticketControl'] })}><option value="none">None</option><option value="platinum">Platinum</option><option value="legend">Legend</option><option value="both">Both</option></select></label><label>Configuration<select value={selectedBanner} onChange={(event) => setSelectedBanner(event.target.value)}><option value={banner.id}>{banner.name}</option></select></label><button onClick={runPlanner}>Search bounded options</button>{message && <p className="notice">{message}</p>}</div><div className="panel"><h3>Planning assumptions</h3><ul className="clean-list"><li>All balances are optional; requirements are conditional.</li><li>Standard costs only; discount/payment mechanics are not verified.</li><li>Demo data is visibly labelled and not a live event.</li><li>Up to three materially different options are returned.</li></ul></div></div>{goal.objective === 'targets' && <div className="panel"><h3>Acquisition targets</h3><p className="muted">Copies are obtained copies, independent of whether the unit was previously owned.</p><div className="target-editor"><label>Target unit<select aria-label="Target unit" value={targetUnitId} onChange={(event) => setTargetUnitId(event.target.value)}>{units.map((unit) => <option value={unit.id} key={unit.id}>{unit.name}</option>)}</select></label><label>Copies<input aria-label="Target copies" type="number" min="1" value={targetCopies} onChange={(event) => setTargetCopies(event.target.value)} /></label><label>Priority<select aria-label="Target priority" value={targetPriority} onChange={(event) => setTargetPriority(event.target.value as GoalConfiguration['targets'][number]['priority'])}><option value="essential">Essential</option><option value="high">High</option><option value="medium">Medium</option><option value="optional">Optional</option></select></label><button onClick={addTarget}>Add target</button></div>{goal.targets.length === 0 ? <p className="notice">Specific-target mode requires at least one target.</p> : <ul className="clean-list">{goal.targets.map((target) => <li key={target.unitId}>{getUnit(target.unitId)?.name ?? target.unitId} · {target.copies} copies · {target.priority}<button className="secondary" onClick={() => setGoal({ ...goal, targets: goal.targets.filter((candidate) => candidate.unitId !== target.unitId) })}>Remove</button></li>)}</ul>}</div>}{route && <div className="panel result"><div className="result-header"><div><p className="eyebrow">{route.status}</p><h3>{route.actions[0]?.type ?? 'No action'}</h3></div><strong>Score {route.score}</strong></div><p>Costs: {route.costs.catFood} Cat Food · {route.costs.rareTickets} Rare · {route.costs.platinumTickets} Platinum · {route.costs.legendTickets} Legend</p><div className="outcomes">{route.outcomes.map((id, index) => <span key={`${id}-${index}`}>{getUnit(id)?.name ?? id}</span>)}</div>{route.limitations.map((limitation) => <p className="muted" key={limitation}>{limitation}</p>)}{recoveryPendingReview && route.status !== 'blocked' && <button onClick={reviewRecovery}>Review recovery assumptions and resume planning</button>}</div>}</section>;
 }
 
-function Guide({ route, canConfirm, confirm, paused, message, banner }: { route?: ReturnType<typeof searchRoutes>[number]; canConfirm: boolean; confirm: (matchedPrediction: boolean, actualOutcomes: Array<string | null>) => void; paused: boolean; message: string; banner: typeof banners[number] }) {
+function Guide({ route, canConfirm, confirm, paused, message, banner, recoverySeed, setRecoverySeed, recoveryAssumptions, setRecoveryAssumptions, recoverSeed }: { route?: ReturnType<typeof searchRoutes>[number]; canConfirm: boolean; confirm: (matchedPrediction: boolean, actualOutcomes: Array<string | null>, actualCost: Partial<ResourceVector>) => void; paused: boolean; message: string; banner: typeof banners[number]; recoverySeed: string; setRecoverySeed: (value: string) => void; recoveryAssumptions: string; setRecoveryAssumptions: (value: string) => void; recoverSeed: () => void }) {
   const [actualOutcome, setActualOutcome] = useState('');
-  if (!route || route.status === 'blocked' || route.actions.length === 0) return <section className="content"><div className="section-heading"><div><p className="eyebrow">Manual confirmation</p><h2>Pulling Guide</h2></div><span className="pill">{paused ? 'Paused for reconciliation' : 'No valid proposal'}</span></div><div className="empty"><h3>{paused ? 'Seed unresolved' : 'Plan first'}</h3><p>{paused ? 'The actual result and spending were recorded, but the guide will not advance until the seed is recovered.' : 'Generate a valid route, then return here to review exact action context.'}</p>{message && <p className="notice">{message}</p>}</div></section>;
-  const enteredOutcomes = actualOutcome.split(',').map((value) => value.trim() || null);
-  const actualResults = [...enteredOutcomes, ...Array<null>(Math.max(0, route.outcomes.length - enteredOutcomes.length)).fill(null)].slice(0, route.outcomes.length);
-  return <section className="content"><div className="section-heading"><div><p className="eyebrow">Manual confirmation</p><h2>Pulling Guide</h2></div><span className="pill">{paused ? 'Paused for reconciliation' : canConfirm ? 'Proposal ready' : 'Proposal stale'}</span></div><div className="panel"><h3>Check before acting</h3><p>Event: {banner.name}</p><p>Draw type: {route.actions[0].type}; cost: {route.costs.catFood} Cat Food, {route.costs.rareTickets} Rare Tickets.</p><div className="outcomes">{route.outcomes.map((id, index) => <span key={`${id}-${index}`}>{index + 1}. {getUnit(id)?.name ?? id}</span>)}</div><p className="notice">This demonstration route is not executable against a live event. A real integration is blocked until independent prediction and payment evidence are available.</p>{paused && <p className="notice">The guide is paused because the previous result differed. Resolve the seed before planning another action.</p>}<div className="actions"><button disabled={!canConfirm || paused} onClick={() => confirm(true, route.actions[0].predictedOutcomes)}>Matches</button><button className="secondary" disabled={!canConfirm || paused || actualOutcome.trim() === ''} onClick={() => confirm(false, actualResults)}>Different result</button></div><label>Actual outcomes, comma-separated<input value={actualOutcome} onChange={(event) => setActualOutcome(event.target.value)} placeholder="e.g. demo-rare, demo-uber" /></label>{message && <p className="notice">{message}</p>}</div></section>;
+  const [costInputs, setCostInputs] = useState<Partial<Record<Currency, string>>>({});
+  const currencies: Currency[] = ['catFood', 'rareTickets', 'platinumTickets', 'legendTickets'];
+  const parsedCosts: Partial<ResourceVector> = {};
+  let costError = '';
+  for (const currency of currencies) {
+    const value = costInputs[currency];
+    if (value === undefined || value.trim() === '') continue;
+    if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(Number(value))) costError = 'Actual spending must be non-negative whole numbers.';
+    else parsedCosts[currency] = Number(value);
+  }
+  function parseOutcomes(expected: number): Array<string | null> | undefined {
+    const values = actualOutcome.split(',').map((value) => value.trim());
+    if (values.length > expected) return undefined;
+    const parsed = [...values, ...Array<string>(Math.max(0, expected - values.length)).fill('?')].slice(0, expected).map((value) => value === '' || value === '?' ? null : value);
+    if (parsed.some((value) => value !== null && getUnit(value) === undefined)) return undefined;
+    return parsed;
+  }
+  const recoveryPanel = paused && <div className="panel"><h3>Recover a paused guide</h3><p className="muted">Editing a seed elsewhere cannot resume this guide. Enter the corrected canonical pre-draw seed and the assumptions used to recover it, then replan and review the replacement.</p><label>Corrected seed<input inputMode="numeric" value={recoverySeed} onChange={(event) => setRecoverySeed(event.target.value)} /></label><label>Recovery assumptions<textarea value={recoveryAssumptions} onChange={(event) => setRecoveryAssumptions(event.target.value)} placeholder="Previous pull position, duplicate-switch assumptions, or other evidence" /></label><button onClick={recoverSeed}>Save corrected seed for review</button></div>;
+  if (!route || route.status === 'blocked' || route.actions.length === 0) return <section className="content"><div className="section-heading"><div><p className="eyebrow">Manual confirmation</p><h2>Pulling Guide</h2></div><span className="pill">{paused ? 'Paused for reconciliation' : 'No valid proposal'}</span></div>{recoveryPanel}<div className="empty"><h3>{paused ? 'Seed unresolved' : 'Plan first'}</h3><p>{paused ? 'The actual result and spending were recorded, but the guide will not advance until the seed is recovered and a replacement route is reviewed.' : 'Generate a valid route, then return here to review exact action context.'}</p>{message && <p className="notice">{message}</p>}</div></section>;
+  const actualResults = parseOutcomes(route.outcomes.length);
+  return <section className="content"><div className="section-heading"><div><p className="eyebrow">Manual confirmation</p><h2>Pulling Guide</h2></div><span className="pill">{paused ? 'Paused for reconciliation' : canConfirm ? 'Proposal ready' : 'Proposal stale'}</span></div>{recoveryPanel}<div className="panel"><h3>Check before acting</h3><p>Event: {banner.name}</p><p>Draw type: {route.actions[0].type}; planned cost: {route.costs.catFood} Cat Food, {route.costs.rareTickets} Rare Tickets.</p><div className="outcomes">{route.outcomes.map((id, index) => <span key={`${id}-${index}`}>{index + 1}. {getUnit(id)?.name ?? id}</span>)}</div><p className="notice">This demonstration route is not executable against a live event. A real integration is blocked until independent prediction and payment evidence are available.</p>{paused && <p className="notice">The guide is paused because the previous result differed. Confirmed history and spending are preserved.</p>}<div className="actions"><button disabled={!canConfirm || paused || Boolean(costError)} onClick={() => confirm(true, route.actions[0].predictedOutcomes, parsedCosts)}>Matches</button><button className="secondary" disabled={!canConfirm || paused || !actualResults || Boolean(costError)} onClick={() => actualResults && confirm(false, actualResults, parsedCosts)}>Different result</button></div><label>Actual outcomes, comma-separated<input value={actualOutcome} onChange={(event) => setActualOutcome(event.target.value)} placeholder="Use ? for unknown positions" /></label>{actualResults === undefined && <p className="notice">Enter valid catalogue unit IDs, commas, and ? for unknown positions.</p>}<div className="cost-grid"><strong>Actual spending (blank = unknown)</strong>{currencies.map((currency) => <label key={currency}>{currency}<input type="number" min="0" step="1" value={costInputs[currency] ?? ''} onChange={(event) => setCostInputs({ ...costInputs, [currency]: event.target.value })} placeholder="Unknown" /></label>)}</div>{costError && <p className="notice">{costError}</p>}{message && <p className="notice">{message}</p>}</div></section>;
 }

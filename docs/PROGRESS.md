@@ -14,7 +14,9 @@
 - Restored active profile identity before enabling writes; profile mutations now read, validate, and write the persisted revision in one readwrite transaction.
 - Added stable action IDs and frozen route inputs, stale/blocked proposal invalidation, matching/mismatch guide confirmation, known-balance debit handling, and unresolved-seed pause state.
 - Added target copy caps, Essential hard constraints, lexicographic target priority vectors, unknown-ownership protection, and explicit ranking-dependent blocking.
-- Added focused predictor, planner, scoring, transaction, reload, blocked-route, and mismatch regression tests.
+- Separated explicit acquisition-copy targets from collection uniqueness. Added planner controls for target units, copy counts, and Essential/High/Medium/Optional priorities; empty specific-target goals are blocked with an actionable explanation.
+- Added validated actual spending controls with per-currency unknown values, persisted corrected-seed recovery assumptions, preserved mismatch history, and mandatory reviewed replanning before a paused guide can resume.
+- Added focused predictor, planner, scoring, transaction, reload, blocked-route, mismatch, target-selection, and recovery regression tests.
 
 ### Explicit blockers
 
@@ -29,8 +31,8 @@
 - `npm.cmd install` completed and generated `package-lock.json`; npm reported 10 audit findings (8 moderate, 2 critical) in the installed development dependency tree. No audit fix was applied because it could change pinned tooling unexpectedly.
 - `npm.cmd run typecheck` passed.
 - `npm.cmd run lint` passed.
-- `npm.cmd test` passed: 4 files, 13 tests.
-- `npm.cmd run test:e2e` passed: 3 Playwright tests covering reload persistence, blocked-route navigation, and mismatch pause.
+- `npm.cmd test -- --run` passed: 4 files, 18 tests.
+- `npm.cmd run test:e2e` passed: 3 Playwright tests covering reload persistence, target selection, blocked-route navigation, mismatch spending, and mismatch-to-recovery replanning.
 - `npm.cmd run build` passed: Vite production bundle emitted to `dist/` after the transaction and planner corrections.
 - The bounded search is a one-action comparison over the configured pull horizon; no 50/100-pull performance or optimality claim is made.
 

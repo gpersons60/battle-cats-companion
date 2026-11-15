@@ -25,6 +25,7 @@ export interface SeedState {
   seed?: number;
   previousUnitId?: string;
   convention: 'canonical-pre-draw';
+  recoveryAssumptions?: string;
 }
 
 export interface ResourceVector {
@@ -55,6 +56,7 @@ export interface AccountProfile {
   completeness: Partial<Record<Rarity, boolean>>;
   history: DrawRecord[];
   guidePaused: boolean;
+  recoveryPendingReview: boolean;
 }
 
 export interface DrawAction {
@@ -104,7 +106,7 @@ export interface DrawRecord {
   revision: number;
   action: DrawAction;
   outcomes: Array<string | null>;
-  actualCost: ResourceVector;
+  actualCost: Partial<ResourceVector>;
   matchedPrediction: boolean;
   seedAfter?: number;
   confirmedAt: string;
@@ -131,6 +133,7 @@ export function emptyProfile(): AccountProfile {
     collection: {},
     completeness: {},
     history: [],
-    guidePaused: false
+    guidePaused: false,
+    recoveryPendingReview: false
   };
 }

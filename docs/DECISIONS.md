@@ -11,3 +11,6 @@
 - Treat the current planner as a bounded one-action demo comparison. It reports `best-found`/blocked and `demo-one-action`; it does not claim multi-action optimality.
 - Keep synthetic fixtures visibly separate from live data. The live catalogue, ranking source, schedule, payment mechanics, and independent prediction examples remain gated until verified and permitted.
 - Support Platinum and Legend ticket controls as optional search permissions, while disabled ticket types never enter candidate actions.
+- Treat explicit target copies as acquisition requirements independent of prior ownership. Keep uniqueness scoring separate: only owned/unowned facts, or missing units under confirmed rarity completeness, can establish a confirmed new unit; unknown ownership never does.
+- Record actual spending as a partial per-currency vector so blank/unknown spending is not silently replaced by planned cost. Debit only entered known amounts.
+- After a mismatch, require an explicit corrected canonical seed plus recovery assumptions. Preserve the mismatch record, keep the guide paused, invalidate the old proposal, and require a reviewed replacement plan before resuming.

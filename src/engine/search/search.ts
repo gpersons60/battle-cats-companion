@@ -45,6 +45,7 @@ function blocked(account: AccountProfile, goal: GoalConfiguration, banner: Banne
 }
 
 export function searchRoutes(account: AccountProfile, banner: BannerConfiguration, units: Unit[], goal: GoalConfiguration): RouteResult[] {
+  if (goal.objective === 'targets' && goal.targets.length === 0) return [blocked(account, goal, banner, 'Select at least one acquisition target before comparing routes.')];
   if (account.seed.status !== 'resolved' || account.seed.seed === undefined) return [blocked(account, goal, banner, 'Enter a canonical numeric seed before planning.')];
   const candidates: RouteResult[] = [];
   const actionTypes: DrawAction['type'][] = ['regular11', 'guaranteed11', 'single', 'platinum', 'legend'];
@@ -71,7 +72,7 @@ export function searchRoutes(account: AccountProfile, banner: BannerConfiguratio
     if (!essentialTargetsMet(fulfillment, goal)) continue;
     const rankingRequired = goal.objective === 'bestValue' || (goal.objective === 'custom' && goal.customWeights.tierValue > 0);
     if (rankingRequired && outcomeUnits.some((unit) => unit.ranking === undefined || tierValue(unit.ranking.label) === undefined)) continue;
-    const score = scoreOutcomes(outcomeUnits, new Set(Object.entries(account.collection).filter(([, state]) => state === 'owned').map(([id]) => id)), goal);
+    const score = scoreOutcomes(outcomeUnits, account, goal);
     candidates.push({
       accountRevision: account.revision,
       goalKey: goalKey(goal),
