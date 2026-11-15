@@ -57,6 +57,15 @@ export interface AccountProfile {
   history: DrawRecord[];
   guidePaused: boolean;
   recoveryPendingReview: boolean;
+  reviewedRecoveryProposal?: RecoveryProposal;
+}
+
+export interface RecoveryProposal {
+  accountRevision: number;
+  inputSeed: number;
+  goalKey: string;
+  bannerVersion: string;
+  actionId: string;
 }
 
 export interface DrawAction {

@@ -71,13 +71,20 @@ describe('account transactions', () => {
     expect(next.balances.rareTickets).toBeUndefined();
   });
 
-  it('keeps unknown actual spending unknown and debits only entered currencies', async () => {
+  it('marks omitted actual spending unknown and debits only entered currencies', async () => {
     const profile = { ...emptyProfile(), balances: { rareTickets: 2, catFood: 100 } };
     await createInitialProfile(profile);
     const next = await confirmDrawTransaction(profile.id, 0, { actionId: action.id, action, outcomes: [null], actualCost: { catFood: 50 }, matchedPrediction: false });
     expect(next.balances.catFood).toBe(50);
-    expect(next.balances.rareTickets).toBe(2);
+    expect(next.balances.rareTickets).toBeUndefined();
     expect(next.history[0].actualCost).toEqual({ catFood: 50 });
+  });
+
+  it('preserves a confirmed zero while distinguishing it from unknown spending', async () => {
+    const profile = { ...emptyProfile(), balances: { rareTickets: 2 } };
+    await createInitialProfile(profile);
+    const next = await confirmDrawTransaction(profile.id, 0, { actionId: action.id, action, outcomes: [null], actualCost: { rareTickets: 0 }, matchedPrediction: false });
+    expect(next.balances.rareTickets).toBe(2);
   });
 
   it('preserves mismatch history and requires reviewed replanning after seed recovery', async () => {
@@ -89,9 +96,25 @@ describe('account transactions', () => {
     expect(recovered.seed.seed).toBe(30);
     expect(recovered.guidePaused).toBe(true);
     expect(recovered.recoveryPendingReview).toBe(true);
-    const reviewed = await reviewRecoveredPlan(profile.id, recovered.revision);
+    const proposal = { accountRevision: recovered.revision, inputSeed: 30, goalKey: '{"objective":"targets"}', bannerVersion: 'fixture-1', actionId: 'replacement-action' };
+    const reviewed = await reviewRecoveredPlan(profile.id, recovered.revision, proposal);
     expect(reviewed.history).toHaveLength(1);
     expect(reviewed.guidePaused).toBe(false);
     expect(reviewed.recoveryPendingReview).toBe(false);
+    expect(reviewed.reviewedRecoveryProposal).toEqual(proposal);
+  });
+
+  it('rejects a replacement proposal whose starting state or goal metadata changed', async () => {
+    const profile = { ...emptyProfile(), seed: { status: 'resolved' as const, seed: 10, convention: 'canonical-pre-draw' as const } };
+    await createInitialProfile(profile);
+    const recovered = await recoverSeedTransaction(profile.id, 0, 30, 'Confirmed previous pull position from manual evidence.');
+    await expect(reviewRecoveredPlan(profile.id, recovered.revision, {
+      accountRevision: recovered.revision,
+      inputSeed: 31,
+      goalKey: '{"objective":"targets"}',
+      bannerVersion: 'fixture-1',
+      actionId: 'replacement-action'
+    })).rejects.toThrow('starting state');
+    expect((await loadActiveProfile())?.recoveryPendingReview).toBe(true);
   });
 });

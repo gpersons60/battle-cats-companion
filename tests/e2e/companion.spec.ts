@@ -51,8 +51,9 @@ test('mismatch pauses the guide and preserves the actual result', async ({ page 
   await page.getByRole('button', { name: 'Save corrected seed for review' }).click();
   await page.getByRole('button', { name: 'Route Planner' }).click();
   await page.getByRole('button', { name: 'Search bounded options' }).click();
-  await page.getByRole('button', { name: 'Review recovery assumptions and resume planning' }).click();
+  await page.getByLabel('Objective').selectOption('mostUbers');
   await page.getByRole('button', { name: 'Search bounded options' }).click();
+  await page.getByRole('button', { name: 'Review recovery assumptions and resume planning' }).click();
   await page.getByRole('button', { name: 'Pulling Guide' }).click();
   await expect(page.getByRole('button', { name: 'Matches' })).toBeEnabled();
 });

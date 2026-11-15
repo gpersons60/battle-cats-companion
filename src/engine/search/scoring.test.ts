@@ -37,4 +37,17 @@ describe('target scoring', () => {
     expect(scoreOutcomes([units[0]], incomplete, goal)).toBe(0);
     expect(scoreOutcomes([units[0]], complete, goal)).toBe(1);
   });
+
+  it('does not reward or penalize an unknown first acquisition in Custom scoring', () => {
+    const goal = { objective: 'custom' as const, targets: [], pullLimit: 2, ticketControl: 'none' as const, resourceCaps: {}, customWeights: { tierValue: 0, uniqueCats: 5, ubers: 0, duplicates: 7 } };
+    expect(scoreOutcomes([units[1]], emptyProfile(), goal)).toBe(0);
+    expect(scoreOutcomes([units[1], units[1]], emptyProfile(), goal)).toBe(-7);
+  });
+
+  it('rewards confirmed new copies and penalizes confirmed duplicates in Custom scoring', () => {
+    const goal = { objective: 'custom' as const, targets: [], pullLimit: 2, ticketControl: 'none' as const, resourceCaps: {}, customWeights: { tierValue: 0, uniqueCats: 5, ubers: 0, duplicates: 7 } };
+    const profile = { ...emptyProfile(), collection: { 'demo-rare': 'unowned' as const } };
+    expect(scoreOutcomes([units[1]], profile, goal)).toBe(5);
+    expect(scoreOutcomes([units[1], units[1]], profile, goal)).toBe(-2);
+  });
 });

@@ -16,15 +16,20 @@ export function scoreOutcomes(outcomes: Unit[], account: AccountProfile, goal: G
     const ownership = account.collection[unit.id];
     const confirmedUnowned = ownership === 'unowned'
       || (ownership === undefined && account.completeness[unit.rarity] === true);
-    const duplicate = ownership === 'owned' || !confirmedUnowned || acquired.has(unit.id);
+    const status = acquired.has(unit.id)
+      || ownership === 'owned'
+      ? 'duplicate'
+      : confirmedUnowned
+        ? 'new'
+        : 'unknown';
     if (goal.objective === 'mostUbers' && unit.rarity === 'Uber Rare') score += 1;
-    if (goal.objective === 'uniqueCats' && !duplicate) score += 1;
-    if (goal.objective === 'bestValue' && !duplicate && unit.ranking) score += tierValue(unit.ranking.label) ?? 0;
+    if (goal.objective === 'uniqueCats' && status === 'new') score += 1;
+    if (goal.objective === 'bestValue' && status === 'new' && unit.ranking) score += tierValue(unit.ranking.label) ?? 0;
     if (goal.objective === 'custom') {
       if (unit.rarity === 'Uber Rare') score += goal.customWeights.ubers;
-      if (!duplicate) score += goal.customWeights.uniqueCats;
-      if (!duplicate && unit.ranking) score += (tierValue(unit.ranking.label) ?? 0) * goal.customWeights.tierValue;
-      if (duplicate) score -= goal.customWeights.duplicates;
+      if (status === 'new') score += goal.customWeights.uniqueCats;
+      if (status === 'new' && unit.ranking) score += (tierValue(unit.ranking.label) ?? 0) * goal.customWeights.tierValue;
+      if (status === 'duplicate') score -= goal.customWeights.duplicates;
     }
     acquired.add(unit.id);
   }

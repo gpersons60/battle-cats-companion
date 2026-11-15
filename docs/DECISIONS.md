@@ -14,3 +14,6 @@
 - Treat explicit target copies as acquisition requirements independent of prior ownership. Keep uniqueness scoring separate: only owned/unowned facts, or missing units under confirmed rarity completeness, can establish a confirmed new unit; unknown ownership never does.
 - Record actual spending as a partial per-currency vector so blank/unknown spending is not silently replaced by planned cost. Debit only entered known amounts.
 - After a mismatch, require an explicit corrected canonical seed plus recovery assumptions. Preserve the mismatch record, keep the guide paused, invalidate the old proposal, and require a reviewed replacement plan before resuming.
+- Model route ownership status as confirmed new, confirmed duplicate, or unknown. Unknown first acquisitions neither earn Custom new-unit/tier rewards nor incur duplicate penalties; a later copy in the same route is a confirmed duplicate.
+- Treat omitted actual spending as unknown per currency. Clear any affected tracked balance rather than preserving a stale confirmed amount, while an explicitly entered zero remains confirmed.
+- Persist the exact reviewed recovery proposal, including input seed, source account revision, goal key, banner configuration version, and action ID. Review validation occurs inside the same account transaction, and the reviewed proposal remains available for guide confirmation.

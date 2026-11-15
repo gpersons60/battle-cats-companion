@@ -1,4 +1,4 @@
-import type { AccountProfile, DrawAction, DrawRecord, ResourceVector } from '../domain/contracts';
+import type { AccountProfile, DrawAction, DrawRecord, RecoveryProposal, ResourceVector } from '../domain/contracts';
 
 const databaseName = 'battle-cats-companion';
 const profileStore = 'profiles';
@@ -132,7 +132,19 @@ function debitKnownBalances(balances: AccountProfile['balances'], cost: Partial<
     if (amount === undefined || amount <= 0 || balance === undefined) continue;
     next[currency] = balance >= amount ? balance - amount : undefined;
   }
+
   return next;
+}
+
+function applyActualSpending(
+  balances: AccountProfile['balances'],
+  actualCost: Partial<ResourceVector>
+): AccountProfile['balances'] {
+  const next = { ...balances };
+  for (const currency of ['catFood', 'rareTickets', 'platinumTickets', 'legendTickets'] as const) {
+    if (actualCost[currency] === undefined) delete next[currency];
+  }
+  return debitKnownBalances(next, actualCost);
 }
 
 export interface ConfirmationInput {
@@ -170,7 +182,8 @@ export function applyConfirmation(profile: AccountProfile, input: ConfirmationIn
   const next = structuredClone(profile);
   next.revision += 1;
   next.history.push(record);
-  next.balances = debitKnownBalances(next.balances, input.actualCost);
+  next.balances = applyActualSpending(next.balances, input.actualCost);
+  delete next.reviewedRecoveryProposal;
   next.guidePaused = !input.matchedPrediction;
   if (input.matchedPrediction && input.seedAfter !== undefined) {
     next.seed = { status: 'resolved', seed: input.seedAfter, convention: 'canonical-pre-draw' };
@@ -198,13 +211,28 @@ export async function recoverSeedTransaction(
     revision: profile.revision + 1,
     seed: { status: 'resolved', seed, convention: 'canonical-pre-draw', recoveryAssumptions: assumptions.trim() },
     guidePaused: true,
-    recoveryPendingReview: true
+    recoveryPendingReview: true,
+    reviewedRecoveryProposal: undefined
   }));
 }
 
-export async function reviewRecoveredPlan(profileId: string, expectedRevision: number): Promise<AccountProfile> {
+export async function reviewRecoveredPlan(profileId: string, expectedRevision: number, proposal: RecoveryProposal): Promise<AccountProfile> {
+  if (!Number.isSafeInteger(proposal.accountRevision) || !Number.isSafeInteger(proposal.inputSeed)
+    || proposal.accountRevision < 0 || proposal.inputSeed < 0
+    || proposal.goalKey.trim() === '' || proposal.bannerVersion.trim() === '' || proposal.actionId.trim() === '') {
+    throw new Error('The replacement proposal is incomplete or invalid.');
+  }
   return updateProfileTransaction(profileId, expectedRevision, (profile) => {
     if (!profile.recoveryPendingReview || profile.seed.status !== 'resolved') throw new Error('Recover a corrected seed before reviewing a replacement plan.');
-    return { ...profile, revision: profile.revision + 1, guidePaused: false, recoveryPendingReview: false };
+    if (proposal.accountRevision !== profile.revision || proposal.inputSeed !== profile.seed.seed) {
+      throw new Error('The replacement proposal no longer matches the recovered starting state.');
+    }
+    return {
+      ...profile,
+      revision: profile.revision + 1,
+      guidePaused: false,
+      recoveryPendingReview: false,
+      reviewedRecoveryProposal: proposal
+    };
   });
 }
