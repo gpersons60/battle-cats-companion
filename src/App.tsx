@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { banners, getUnit, units } from './data/catalogue';
-import { emptyProfile, type AccountProfile, type Currency, type GoalConfiguration, type Objective, type ResourceVector } from './domain/contracts';
+import { emptyProfile, type AccountProfile, type Currency, type GoalConfiguration, type Objective, type RealBannerConfiguration, type RealDrawType, type ResourceVector } from './domain/contracts';
 import { predict } from './engine/prediction/predictor';
+import { importRealBanners } from './engine/prediction/realBannerAdapter';
+import { predictReal } from './engine/prediction/realPredictor';
 import { searchRoutes } from './engine/search/search';
 import { confirmDrawTransaction, createInitialProfile, loadActiveProfile, recoverSeedTransaction, reviewRecoveredPlan, updateProfileTransaction } from './storage/accountStore';
 import './styles.css';
@@ -24,6 +26,7 @@ export default function App() {
   const [storageError, setStorageError] = useState('');
   const [recoverySeed, setRecoverySeed] = useState('');
   const [recoveryAssumptions, setRecoveryAssumptions] = useState('');
+  const [realBanners, setRealBanners] = useState<RealBannerConfiguration[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -147,7 +150,7 @@ export default function App() {
       {page === 'home' && <Home go={setPage} profile={profile} />}
       {page === 'account' && <Account profile={profile} seedInput={seedInput} setSeedInput={setSeedInput} setSeed={setSeed} mutate={mutateProfile} message={routeMessage} />}
       {page === 'discover' && <Discover search={search} setSearch={setSearch} owned={owned} mutate={mutateProfile} />}
-      {page === 'tracker' && <Tracker profile={profile} banner={banner} />}
+      {page === 'tracker' && <Tracker profile={profile} banner={banner} realBanners={realBanners} setRealBanners={setRealBanners} />}
       {page === 'planner' && <Planner goal={goal} setGoal={(next) => { setGoal(next); setLastRoute(undefined); }} banner={banner} selectedBanner={selectedBanner} setSelectedBanner={(next) => { setSelectedBanner(next); setLastRoute(undefined); }} runPlanner={runPlanner} route={lastRoute} message={routeMessage} recoveryPendingReview={profile.recoveryPendingReview} reviewRecovery={reviewRecovery} />}
       {page === 'guide' && <Guide route={lastRoute} canConfirm={routeIsCurrent} confirm={confirmCurrent} paused={profile.guidePaused} message={routeMessage} banner={banner} recoverySeed={recoverySeed} setRecoverySeed={setRecoverySeed} recoveryAssumptions={recoveryAssumptions} setRecoveryAssumptions={setRecoveryAssumptions} recoverSeed={recoverSeed} />}
     </main>
@@ -168,9 +171,37 @@ function Discover({ search, setSearch, owned, mutate }: { search: string; setSea
   return <section className="content"><div className="section-heading"><div><p className="eyebrow">Manual collection</p><h2>Discover</h2></div><span className="pill">Synthetic catalogue only</span></div><div className="panel"><label>Search units<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name or alias" /></label></div><div className="unit-grid">{filtered.map((unit) => <article className="unit-card" key={unit.id}><div className="unit-icon">{unit.rarity.slice(0, 1)}</div><div><h3>{unit.name}</h3><p>{unit.rarity} · {unit.traits.join(', ')}</p><small>{unit.source}</small></div><button className={owned.has(unit.id) ? 'secondary' : ''} onClick={() => void mutate((current) => ({ ...current, collection: { ...current.collection, [unit.id]: owned.has(unit.id) ? 'unknown' : 'owned' } }))}>{owned.has(unit.id) ? 'Remove' : 'Mark owned'}</button></article>)}</div></section>;
 }
 
-function Tracker({ profile, banner }: { profile: AccountProfile; banner: typeof banners[number] }) {
+function Tracker({ profile, banner, realBanners, setRealBanners }: { profile: AccountProfile; banner: typeof banners[number]; realBanners: RealBannerConfiguration[]; setRealBanners: (banners: RealBannerConfiguration[]) => void }) {
+  const [realSeed, setRealSeed] = useState('');
+  const [realBannerId, setRealBannerId] = useState('');
+  const [realDrawType, setRealDrawType] = useState<RealDrawType>('single');
+  const [realPrediction, setRealPrediction] = useState<ReturnType<typeof predictReal>>();
+  const [realMessage, setRealMessage] = useState('');
   const prediction = profile.seed.status === 'resolved' ? predict(profile.seed, { id: 'tracker-preview', type: 'single', bannerId: banner.id, cost: { catFood: 0, rareTickets: 1, platinumTickets: 0, legendTickets: 0 }, inputSeed: profile.seed.seed ?? 0, predictedOutcomes: [] }, banner) : undefined;
-  return <section className="content"><div className="section-heading"><div><p className="eyebrow">No state mutation</p><h2>Seed Tracker</h2></div><span className="pill">Position 1</span></div><div className="panel"><h3>Next eligible single</h3>{prediction ? <><div className="outcome-large">{getUnit(prediction.outcomes[0])?.name ?? 'Unknown unit'}</div><p className="muted">Configuration: {banner.name}. This is a synthetic fixture and not a verified live banner.</p></> : <p className="notice">Resolve a numeric seed in Account to inspect outcomes.</p>}</div><div className="panel"><h3>Reachability reminder</h3><p className="muted">A matching table position is not a route. Actual reachability must account for prior pulls, duplicate switches, costs, and the selected action context.</p></div></section>;
+  const selectedRealBanner = realBanners.find((item) => item.id === realBannerId) ?? realBanners[0];
+  function importFile(file: File | undefined) {
+    if (!file) return;
+    void file.text().then((text) => {
+      const imported = importRealBanners(JSON.parse(text) as unknown);
+      setRealBanners(imported);
+      setRealBannerId(imported[0].id);
+      setRealDrawType(imported[0].supports[0]);
+      setRealMessage(`Imported ${imported.length} validated historical configuration(s).`);
+    }).catch((error: unknown) => setRealMessage(error instanceof Error ? error.message : 'Real configuration import failed.'));
+  }
+  function runRealPrediction() {
+    if (!selectedRealBanner) { setRealMessage('Import a validated BCEN configuration first.'); return; }
+    const seed = Number(realSeed);
+    if (!/^\d+$/.test(realSeed.trim()) || !Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) { setRealMessage('Enter a uint32 seed from 0 through 4294967295.'); return; }
+    try {
+      setRealPrediction(predictReal({ status: 'resolved', seed, convention: 'canonical-pre-draw' }, realDrawType, selectedRealBanner));
+      setRealMessage('');
+    } catch (error: unknown) {
+      setRealPrediction(undefined);
+      setRealMessage(error instanceof Error ? error.message : 'Real prediction failed.');
+    }
+  }
+  return <section className="content"><div className="section-heading"><div><p className="eyebrow">No state mutation</p><h2>Seed Tracker</h2></div><span className="pill">Read-only</span></div><div className="panel"><h3>Synthetic demo preview</h3>{prediction ? <><div className="outcome-large">{getUnit(prediction.outcomes[0])?.name ?? 'Unknown unit'}</div><p className="muted">Configuration: {banner.name}. Synthetic fixture only; not a verified live banner.</p></> : <p className="notice">Resolve a numeric seed in Account to inspect the synthetic demo.</p>}</div><div className="panel"><h3>Real BCEN configuration import</h3><p className="muted">Import a versioned source snapshot locally. This never changes the account or pulling guide. Historical configurations are not currently available banners.</p><label>Source JSON<input type="file" accept="application/json,.json" onChange={(event) => importFile(event.target.files?.[0])} /></label>{realBanners.length > 0 && <><label>Numeric seed<input inputMode="numeric" value={realSeed} onChange={(event) => setRealSeed(event.target.value)} placeholder="0–4294967295" /></label><label>Configuration<select value={selectedRealBanner?.id ?? ''} onChange={(event) => { setRealBannerId(event.target.value); setRealPrediction(undefined); }}>{realBanners.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.availability}</option>)}</select></label><label>Draw type<select value={realDrawType} onChange={(event) => setRealDrawType(event.target.value as RealDrawType)}>{(selectedRealBanner?.supports ?? []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label><button onClick={runRealPrediction}>Inspect real prediction</button></>}{realMessage && <p className="notice">{realMessage}</p>}{selectedRealBanner && <p className="muted">Evidence: {selectedRealBanner.source.evidence}; source revision {selectedRealBanner.source.revision}; {selectedRealBanner.availability} configuration.</p>}{realPrediction && <><h4>Ordered outcomes</h4><ol>{realPrediction.outcomes.map((outcome, index) => <li key={`${outcome}-${index}`}>{selectedRealBanner?.sourceNames[outcome] ?? outcome}</li>)}</ol><p className="muted">Final canonical seed: {realPrediction.next.seed}; previous unit: {realPrediction.next.previousUnitId}; transitions: {realPrediction.transitions.map((item) => item.kind).join(', ')}.</p></>}</div><div className="panel"><h3>Reachability reminder</h3><p className="muted">A matching table position is not a route. Real imported predictions are intentionally unavailable to the planner and Pulling Guide until independent evidence and source-use requirements are resolved.</p></div></section>;
 }
 
 function Planner({ goal, setGoal, banner, selectedBanner, setSelectedBanner, runPlanner, route, message, recoveryPendingReview, reviewRecovery }: { goal: GoalConfiguration; setGoal: (g: GoalConfiguration) => void; banner: typeof banners[number]; selectedBanner: string; setSelectedBanner: (v: string) => void; runPlanner: () => void; route?: ReturnType<typeof searchRoutes>[number]; message: string; recoveryPendingReview: boolean; reviewRecovery: (route: ReturnType<typeof searchRoutes>[number]) => void }) {

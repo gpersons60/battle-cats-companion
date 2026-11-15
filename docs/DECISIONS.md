@@ -17,3 +17,6 @@
 - Model route ownership status as confirmed new, confirmed duplicate, or unknown. Unknown first acquisitions neither earn Custom new-unit/tier rewards nor incur duplicate penalties; a later copy in the same route is a confirmed duplicate.
 - Treat omitted actual spending as unknown per currency. Clear any affected tracked balance rather than preserving a stale confirmed amount, while an explicitly entered zero remains confirmed.
 - Persist the exact reviewed recovery proposal, including input seed, source account revision, goal key, banner configuration version, and action ID. Review validation occurs inside the same account transaction, and the reviewed proposal remains available for guide confirmation.
+- Adapt only the pinned upstream roll module for real prediction; keep its engine boundary independent from React, storage, scoring, payment, and route search.
+- Use the upstream pre-draw convention as the companion canonical convention. The selected slot seed becomes the next canonical seed, while previous-unit state is carried separately for duplicate-Rare rerolls across banner boundaries.
+- Import versioned BCEN source JSON locally instead of bundling unresolved game data. Real configurations are read-only and cannot enter the synthetic planner or Pulling Guide until source-use permission and independent evidence are available.

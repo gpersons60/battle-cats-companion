@@ -45,6 +45,46 @@ export interface BannerConfiguration {
   version: string;
 }
 
+export type RealBannerAvailability = 'historical' | 'current' | 'unknown';
+export type RealDrawType = 'single' | 'regular11' | 'guaranteed11' | 'platinum' | 'legend';
+
+export interface RealBannerConfiguration {
+  id: string;
+  name: string;
+  region: 'BCEN';
+  availability: RealBannerAvailability;
+  type: 'normal' | 'platinum' | 'legend';
+  pool: string[];
+  sourceRarities: Record<string, number>;
+  sourceNames: Record<string, string>;
+  rarityRates: { rare: number; superRare: number; uber: number; legend: number };
+  guaranteed: boolean;
+  supports: RealDrawType[];
+  source: {
+    url: string;
+    revision: string;
+    hash: string;
+    builtOn?: string;
+    license: string;
+    evidence: 'same-lineage-fixture';
+  };
+  version: string;
+}
+
+export interface PredictionTransition {
+  kind: 'normal' | 'duplicate-reroll' | 'guaranteed';
+  inputSeed: number;
+  outputSeed: number;
+  position: string;
+}
+
+export interface RealPrediction {
+  outcomes: string[];
+  next: SeedState;
+  transitions: PredictionTransition[];
+  evidence: RealBannerConfiguration['source']['evidence'];
+}
+
 export interface AccountProfile {
   id: string;
   name: string;
@@ -128,7 +168,7 @@ export const EMPTY_RESOURCES: ResourceVector = {
 export function validateSeed(value: string): number | undefined {
   if (!/^\d+$/.test(value.trim())) return undefined;
   const seed = Number(value);
-  return Number.isSafeInteger(seed) && seed >= 0 ? seed : undefined;
+  return Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffffffff ? seed : undefined;
 }
 
 export function emptyProfile(): AccountProfile {

@@ -57,3 +57,16 @@ test('mismatch pauses the guide and preserves the actual result', async ({ page 
   await page.getByRole('button', { name: 'Pulling Guide' }).click();
   await expect(page.getByRole('button', { name: 'Matches' })).toBeEnabled();
 });
+
+test('imports a real historical configuration without mutating the account', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Seed Tracker' }).click();
+  await page.getByLabel('Source JSON').setInputFiles('tests/fixtures/bcen-validation-fixture.json');
+  await expect(page.getByText(/Imported \d+ validated historical configuration/)).toBeVisible();
+  await page.getByLabel('Numeric seed').fill('0');
+  await page.getByRole('button', { name: 'Inspect real prediction' }).click();
+  await expect(page.getByText('Ordered outcomes')).toBeVisible();
+  await expect(page.getByText(/same-lineage-fixture/)).toBeVisible();
+  await page.getByRole('button', { name: /rev 0/ }).click();
+  await expect(page.getByLabel('Numeric seed')).toHaveValue('');
+});
